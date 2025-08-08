@@ -1,18 +1,21 @@
 const crypto = require('crypto');
-const { Client } = require('@elastic/elasticsearch');
 const { validateSparkPostEvent, validateSignature } = require('../lib/validation');
 const { processEvents } = require('../lib/eventProcessor');
 const { logger } = require('../lib/logger');
 
-// Initialize Elasticsearch client
-const elasticsearch = new Client({
-  cloud: {
-    id: process.env.ELASTICSEARCH_CLOUD_ID
-  },
-  auth: {
-    apiKey: process.env.ELASTICSEARCH_API_KEY
-  }
-});
+// Initialize Elasticsearch client only if credentials are provided
+let elasticsearch = null;
+if (process.env.ELASTICSEARCH_CLOUD_ID && process.env.ELASTICSEARCH_API_KEY) {
+  const { Client } = require('@elastic/elasticsearch');
+  elasticsearch = new Client({
+    cloud: {
+      id: process.env.ELASTICSEARCH_CLOUD_ID
+    },
+    auth: {
+      apiKey: process.env.ELASTICSEARCH_API_KEY
+    }
+  });
+}
 
 // Webhook handler for Vercel serverless function
 module.exports = async (req, res) => {
@@ -32,6 +35,15 @@ module.exports = async (req, res) => {
   }
 
   try {
+    // Check if Elasticsearch is configured
+    if (!elasticsearch) {
+      logger.warn('Elasticsearch not configured - webhook cannot process events');
+      return res.status(503).json({
+        error: 'Service unavailable',
+        message: 'Elasticsearch not configured'
+      });
+    }
+
     // Validate content type
     if (!req.headers['content-type']?.includes('application/json')) {
       logger.warn('Invalid content type');
@@ -45,13 +57,16 @@ module.exports = async (req, res) => {
     const rawBody = JSON.stringify(req.body);
     const signature = req.headers['x-sparkpost-webhook-signature'];
 
-    // Validate webhook signature
-    if (!validateSignature(rawBody, signature, process.env.SPARKPOST_WEBHOOK_SECRET)) {
+    // Skip signature validation in development if no secret is provided
+    const webhookSecret = process.env.SPARKPOST_WEBHOOK_SECRET;
+    if (webhookSecret && !validateSignature(rawBody, signature, webhookSecret)) {
       logger.error('Invalid webhook signature');
       return res.status(401).json({ 
         error: 'Unauthorized',
         message: 'Invalid webhook signature'
       });
+    } else if (!webhookSecret) {
+      logger.warn('No webhook secret configured - skipping signature validation (development mode)');
     }
 
     // Validate request body structure
