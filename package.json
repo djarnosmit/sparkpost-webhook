@@ -4,7 +4,8 @@
   "description": "Secure SparkPost webhook receiver that forwards events to Elasticsearch",
   "main": "index.js",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "nodemon -e js --watch api --watch lib --exec \"vercel dev --listen 3000\"",
+    "dev:simple": "node -e \"console.log('For development, run: vercel dev')\"",
     "start": "node index.js",
     "test": "jest",
     "test:watch": "jest --watch",
