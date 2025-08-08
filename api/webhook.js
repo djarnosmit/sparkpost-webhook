@@ -74,6 +74,17 @@ module.exports = async (req, res) => {
   }
 
   try {
+    // Log incoming request for debugging
+    logger.info('Webhook request received', {
+      headers: {
+        'content-type': req.headers['content-type'],
+        'user-agent': req.headers['user-agent'],
+        'content-length': req.headers['content-length']
+      },
+      bodyLength: Array.isArray(req.body) ? req.body.length : 'Not an array',
+      bodyType: typeof req.body
+    });
+
     // Check if Elasticsearch is configured
     if (!elasticsearch) {
       logger.warn('Elasticsearch not configured - webhook cannot process events');
@@ -101,10 +112,54 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Debug: Log first few events to understand the structure
+    if (Array.isArray(req.body) && req.body.length > 0) {
+      logger.info('Sample events received', {
+        totalEvents: req.body.length,
+        firstEvent: req.body[0],
+        eventKeys: Object.keys(req.body[0] || {})
+      });
+    } else {
+      logger.warn('Request body is not an array or is empty', {
+        bodyType: typeof req.body,
+        body: req.body
+      });
+    }
+
+    // Handle empty request body gracefully
+    if (!req.body || (Array.isArray(req.body) && req.body.length === 0)) {
+      logger.info('Empty webhook request received - returning success');
+      return res.status(200).json({
+        success: true,
+        message: 'Empty webhook processed successfully',
+        processed: 0,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Filter out empty or invalid events before validation
+    let events = Array.isArray(req.body) ? req.body : [req.body];
+    events = events.filter(event => event && typeof event === 'object' && Object.keys(event).length > 0);
+    
+    if (events.length === 0) {
+      logger.info('No valid events found after filtering');
+      return res.status(200).json({
+        success: true,
+        message: 'No valid events to process',
+        processed: 0,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     // Validate request body structure
-    const { error: validationError, value: validatedData } = validateSparkPostEvent(req.body);
+    const { error: validationError, value: validatedData } = validateSparkPostEvent(events);
     if (validationError) {
-      logger.warn(`Validation error: ${validationError.message}`);
+      logger.error('Validation error details', {
+        error: validationError.message,
+        eventCount: events.length,
+        sampleEvents: events.slice(0, 3) // Log first 3 events for debugging
+      });
+      
       return res.status(400).json({ 
         error: 'Validation failed',
         message: validationError.message,
