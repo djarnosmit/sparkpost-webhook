@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { validateSparkPostEvent, validateSignature } = require('../lib/validation');
+const { validateSparkPostEvent } = require('../lib/validation');
 const { processEvents } = require('../lib/eventProcessor');
 const { logger } = require('../lib/logger');
 
@@ -15,6 +15,45 @@ if (process.env.ELASTICSEARCH_CLOUD_ID && process.env.ELASTICSEARCH_API_KEY) {
       apiKey: process.env.ELASTICSEARCH_API_KEY
     }
   });
+}
+
+// Validate SparkPost Basic Auth (if configured)
+function validateBasicAuth(req) {
+  const username = process.env.SPARKPOST_WEBHOOK_USERNAME;
+  const password = process.env.SPARKPOST_WEBHOOK_PASSWORD;
+  
+  // Skip auth validation if not configured (for local testing)
+  if (!username || !password) {
+    logger.info('No Basic Auth configured - allowing request (development mode)');
+    return true;
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
+    logger.warn('Missing or invalid Authorization header');
+    return false;
+  }
+
+  try {
+    const base64Credentials = authHeader.slice(6); // Remove 'Basic '
+    const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
+    const [reqUsername, reqPassword] = credentials.split(':');
+    
+    // Use timing-safe comparison to prevent timing attacks
+    const usernameMatch = crypto.timingSafeEqual(
+      Buffer.from(username),
+      Buffer.from(reqUsername || '')
+    );
+    const passwordMatch = crypto.timingSafeEqual(
+      Buffer.from(password),
+      Buffer.from(reqPassword || '')
+    );
+    
+    return usernameMatch && passwordMatch;
+  } catch (error) {
+    logger.error('Basic Auth validation error:', error);
+    return false;
+  }
 }
 
 // Webhook handler for Vercel serverless function
@@ -44,6 +83,15 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Validate Basic Authentication
+    if (!validateBasicAuth(req)) {
+      logger.error('Basic Auth validation failed');
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid credentials'
+      });
+    }
+
     // Validate content type
     if (!req.headers['content-type']?.includes('application/json')) {
       logger.warn('Invalid content type');
@@ -51,22 +99,6 @@ module.exports = async (req, res) => {
         error: 'Invalid content type',
         message: 'Content-Type must be application/json'
       });
-    }
-
-    // Get raw body for signature validation
-    const rawBody = JSON.stringify(req.body);
-    const signature = req.headers['x-sparkpost-webhook-signature'];
-
-    // Skip signature validation in development if no secret is provided
-    const webhookSecret = process.env.SPARKPOST_WEBHOOK_SECRET;
-    if (webhookSecret && !validateSignature(rawBody, signature, webhookSecret)) {
-      logger.error('Invalid webhook signature');
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Invalid webhook signature'
-      });
-    } else if (!webhookSecret) {
-      logger.warn('No webhook secret configured - skipping signature validation (development mode)');
     }
 
     // Validate request body structure
