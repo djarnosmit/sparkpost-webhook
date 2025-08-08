@@ -1,16 +1,5 @@
-const { Client } = require('@elastic/elasticsearch');
 const { healthCheck } = require('../lib/eventProcessor');
 const { logger } = require('../lib/logger');
-
-// Initialize Elasticsearch client
-const elasticsearch = new Client({
-  cloud: {
-    id: process.env.ELASTICSEARCH_CLOUD_ID
-  },
-  auth: {
-    apiKey: process.env.ELASTICSEARCH_API_KEY
-  }
-});
 
 module.exports = async (req, res) => {
   // Only allow GET requests
@@ -24,13 +13,34 @@ module.exports = async (req, res) => {
   try {
     const startTime = Date.now();
     
-    // Check Elasticsearch health
-    const esHealth = await healthCheck(elasticsearch);
+    // Check if Elasticsearch is configured
+    const isElasticsearchConfigured = process.env.ELASTICSEARCH_CLOUD_ID && process.env.ELASTICSEARCH_API_KEY;
+    let esHealth;
+    
+    if (isElasticsearchConfigured) {
+      // Initialize Elasticsearch client only if configured
+      const { Client } = require('@elastic/elasticsearch');
+      const elasticsearch = new Client({
+        cloud: {
+          id: process.env.ELASTICSEARCH_CLOUD_ID
+        },
+        auth: {
+          apiKey: process.env.ELASTICSEARCH_API_KEY
+        }
+      });
+      
+      esHealth = await healthCheck(elasticsearch);
+    } else {
+      esHealth = {
+        status: 'not_configured',
+        message: 'Elasticsearch credentials not provided (normal in development)'
+      };
+    }
     
     const responseTime = Date.now() - startTime;
     
     const healthStatus = {
-      status: 'healthy',
+      status: isElasticsearchConfigured && esHealth.status === 'healthy' ? 'healthy' : 'degraded',
       timestamp: new Date().toISOString(),
       service: 'sparkpost-webhook',
       version: '1.0.0',
@@ -41,15 +51,12 @@ module.exports = async (req, res) => {
       }
     };
 
-    // Determine overall health status
-    if (esHealth.status !== 'healthy') {
-      healthStatus.status = 'unhealthy';
-      res.status(503);
-    } else {
-      res.status(200);
-    }
+    // Return 200 even if Elasticsearch is not configured (for development)
+    const statusCode = isElasticsearchConfigured ? 
+      (esHealth.status === 'healthy' ? 200 : 503) : 
+      200;
 
-    return res.json(healthStatus);
+    return res.status(statusCode).json(healthStatus);
 
   } catch (error) {
     logger.error('Health check failed:', error);
@@ -58,7 +65,8 @@ module.exports = async (req, res) => {
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
       service: 'sparkpost-webhook',
-      error: 'Health check failed'
+      error: 'Health check failed',
+      message: error.message
     });
   }
 };
