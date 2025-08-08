@@ -1,16 +1,6 @@
 {
   "version": 2,
   "name": "sparkpost-webhook",
-  "builds": [
-    {
-      "src": "api/webhook.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/health.js",
-      "use": "@vercel/node"
-    }
-  ],
   "routes": [
     {
       "src": "/api/webhook",
