@@ -4,7 +4,9 @@ A secure, production-ready webhook receiver that captures SparkPost email events
 
 ## 🚀 Features
 
-- ✅ **Secure webhook validation** with HMAC-SHA1 signature verification
+- ✅ **Flexible Authentication** - Basic Auth, OAuth 2.0, or none
+- ✅ **Secure webhook validation** with comprehensive input sanitization
+- ✅ **Enhanced debug logging** with HTTP headers and detailed request tracking
 - ✅ **Comprehensive data validation** using Joi schemas
 - ✅ **Rate limiting** to prevent abuse
 - ✅ **Elasticsearch integration** with proper indexing and mappings
@@ -14,6 +16,31 @@ A secure, production-ready webhook receiver that captures SparkPost email events
 - ✅ **Vercel-ready** serverless deployment
 - ✅ **Event categorization** for better analytics
 - ✅ **Geolocation support** with geo_point mapping
+
+## 🔐 Authentication
+
+The webhook supports three authentication methods:
+
+### **Basic Authentication**
+```env
+SPARKPOST_AUTH_TYPE=basic
+SPARKPOST_WEBHOOK_USERNAME=your-username
+SPARKPOST_WEBHOOK_PASSWORD=your-secure-password
+```
+
+### **OAuth 2.0 (JWT Bearer Tokens)**
+```env
+SPARKPOST_AUTH_TYPE=oauth
+SPARKPOST_OAUTH_CLIENT_ID=your-oauth-client-id
+SPARKPOST_OAUTH_JWKS_ENDPOINT=https://your-auth-provider.com/.well-known/jwks.json
+SPARKPOST_OAUTH_AUDIENCE=your-audience
+SPARKPOST_OAUTH_SCOPES=webhook:write,events:read
+```
+
+### **No Authentication (Development Only)**
+```env
+SPARKPOST_AUTH_TYPE=none
+```
 
 ## 📋 Quick Start
 
@@ -25,13 +52,30 @@ Create a `.env` file based on `.env.example`:
 cp .env.example .env
 ```
 
-Fill in your credentials:
+Configure your authentication method and credentials:
+
 ```env
-SPARKPOST_WEBHOOK_SECRET=your-sparkpost-webhook-secret-here
+# Choose authentication type
+SPARKPOST_AUTH_TYPE=basic  # or "oauth" or "none"
+
+# Basic Auth (if using SPARKPOST_AUTH_TYPE=basic)
+SPARKPOST_WEBHOOK_USERNAME=webhook-user
+SPARKPOST_WEBHOOK_PASSWORD=secure-password-123
+
+# OAuth (if using SPARKPOST_AUTH_TYPE=oauth)
+SPARKPOST_OAUTH_CLIENT_ID=your-client-id
+SPARKPOST_OAUTH_JWKS_ENDPOINT=https://auth.example.com/.well-known/jwks.json
+SPARKPOST_OAUTH_AUDIENCE=sparkpost-webhook
+SPARKPOST_OAUTH_SCOPES=webhook:write
+
+# Elasticsearch Configuration
 ELASTICSEARCH_CLOUD_ID=your-elasticsearch-cloud-id
 ELASTICSEARCH_API_KEY=your-elasticsearch-api-key
+
+# Debug Configuration
 NODE_ENV=production
-LOG_LEVEL=info
+LOG_LEVEL=debug  # Use "debug" for detailed logging
+LOG_HTTP_HEADERS=true  # Include HTTP headers in debug logs
 ```
 
 ### 2. Install Dependencies
@@ -43,11 +87,8 @@ npm install
 ### 3. Local Development
 
 ```bash
-# Install Vercel CLI if you haven't already
-npm i -g vercel
-
 # Start development server
-npm run dev
+vercel dev
 ```
 
 The webhook will be available at `http://localhost:3000/api/webhook`
@@ -72,17 +113,45 @@ vercel --prod
 
 Main webhook endpoint for receiving SparkPost events.
 
-**Headers:**
-- `Content-Type: application/json`
-- `X-SparkPost-Webhook-Signature: <hmac_signature>`
+**Authentication Headers:**
+
+For Basic Auth:
+```
+Authorization: Basic <base64(username:password)>
+```
+
+For OAuth:
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Request:**
+```bash
+curl -X POST https://your-app.vercel.app/api/webhook \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic $(echo -n 'username:password' | base64)" \
+  -d '[{
+    "msys": {
+      "message_event": {
+        "event_id": "123456789",
+        "timestamp": "2025-08-11T08:00:00.000Z",
+        "type": "delivery",
+        "recipient": "user@example.com"
+      }
+    }
+  }]'
+```
 
 **Response:**
 ```json
 {
   "success": true,
   "message": "Webhook processed successfully",
-  "processed": 5,
-  "timestamp": "2024-01-15T10:30:00.000Z"
+  "processed": 1,
+  "failed": 0,
+  "indexName": "sparkpost-events-2025-08-11",
+  "processingTime": "45ms",
+  "timestamp": "2025-08-11T08:00:00.000Z"
 }
 ```
 
@@ -94,7 +163,7 @@ Health check endpoint for monitoring.
 ```json
 {
   "status": "healthy",
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "timestamp": "2025-08-11T08:00:00.000Z",
   "service": "sparkpost-webhook",
   "version": "1.0.0",
   "checks": {
@@ -108,184 +177,139 @@ Health check endpoint for monitoring.
 
 ## 🔧 SparkPost Configuration
 
-1. In your SparkPost dashboard, go to **Webhooks**
-2. Create a new webhook with your Vercel URL: `https://your-app.vercel.app/api/webhook`
-3. Select the events you want to track:
-   - **Core Events:** delivery, bounce, spam_complaint
-   - **Engagement Events:** open, click, unsubscribe
-   - **Sending Events:** injection, policy_rejection
-4. Set authentication method and copy the webhook secret
-5. Save and test the webhook
+### **Basic Auth Setup**
 
-## 📊 Elasticsearch Integration
+1. In SparkPost dashboard → **Webhooks**
+2. **Authentication Type:** Basic Auth
+3. **Username/Password:** Use your configured credentials
+4. **Target URL:** `https://your-app.vercel.app/api/webhook`
 
-### Index Structure
-Events are stored in daily indices: `sparkpost-events-YYYY-MM-DD`
+### **OAuth Setup**
 
-### Event Categories
-Events are automatically categorized:
-- `engagement`: delivery, open, click, unsubscribe
-- `sending`: injection, generation events
-- `delivery_failure`: bounce, policy_rejection, out_of_band
-- `delivery_issue`: delay
-- `reputation`: spam_complaint
-- `relay`: relay_* events
+1. **Authentication Type:** OAuth 2.0
+2. **Target URL:** `https://your-app.vercel.app/api/webhook`
+3. Configure your OAuth provider to issue JWT tokens with:
+   - Proper audience (`SPARKPOST_OAUTH_AUDIENCE`)
+   - Required scopes (`SPARKPOST_OAUTH_SCOPES`)
+   - JWKS endpoint for verification
 
-### Sample Queries
+### **Development Setup**
 
-**Get recent bounces:**
+1. **Authentication Type:** None
+2. **Target URL:** `http://your-ngrok-url.ngrok.io/api/webhook`
+
+## 🐛 Debug Logging
+
+Enable comprehensive debug logging:
+
+```env
+LOG_LEVEL=debug
+LOG_HTTP_HEADERS=true
+```
+
+**Debug logs include:**
+- ✅ **HTTP Headers** - All incoming request headers (sanitized)
+- ✅ **Authentication Details** - Auth type, success/failure, user info
+- ✅ **Request Processing** - Processing times, event counts
+- ✅ **SparkPost Headers** - Special SparkPost webhook headers
+- ✅ **Validation Details** - Event validation results and errors
+- ✅ **Elasticsearch Operations** - Index operations and results
+
+**Sample debug output:**
 ```json
 {
-  "query": {
-    "bool": {
-      "must": [
-        { "term": { "type": "bounce" } },
-        { "range": { "@timestamp": { "gte": "now-1d" } } }
-      ]
-    }
+  "timestamp": "2025-08-11T08:00:00.000Z",
+  "level": "DEBUG",
+  "message": "Authentication attempt",
+  "authType": "basic",
+  "success": true,
+  "username": "webhook-user",
+  "ip": "192.168.1.100",
+  "headers": {
+    "authorization": "Basic [REDACTED]",
+    "content-type": "application/json",
+    "user-agent": "SparkPost"
   }
 }
 ```
 
-**Engagement analytics:**
-```json
-{
-  "query": {
-    "terms": { "type": ["open", "click", "delivery"] }
-  },
-  "aggs": {
-    "by_type": {
-      "terms": { "field": "type" }
-    }
-  }
-}
-```
+## 📊 Supported SparkPost Events
+
+✅ **Message Events:** delivery, bounce, injection, spam_complaint, delay, policy_rejection  
+✅ **Tracking Events:** open, initial_open, click, unsubscribe  
+✅ **AMP Events:** amp_open, amp_click, amp_initial_open  
+✅ **SMS Events:** sms_status  
+✅ **Generation Events:** generation_failure, generation_rejection  
+✅ **Relay Events:** All relay event types  
 
 ## 🔒 Security Features
 
-### Webhook Security
-- HMAC-SHA1 signature validation with timing-safe comparison
-- Input sanitization and validation with Joi schemas
-- Rate limiting (1000 requests per 15 minutes per IP)
+### **Authentication Security**
+- Timing-safe credential comparison
+- JWT signature verification (OAuth)
+- Configurable scopes and audiences
+- Request IP logging and tracking
 
-### Application Security
+### **Application Security**
 - Security headers (CSP, HSTS, X-Frame-Options, etc.)
+- Input sanitization and validation
+- Rate limiting (1000 req/15min)
 - Sensitive data redaction in logs
-- Error handling without information leakage
 
-## 📝 Monitoring and Logging
+### **Debug Security**
+- Automatic credential redaction in logs
+- Configurable header logging
+- Safe error handling without information leakage
 
-### Log Levels
-- `error`: Critical errors requiring immediate attention
-- `warn`: Warning conditions
-- `info`: General information (default)
-- `debug`: Detailed debugging information
+## 📈 Environment Variables Reference
 
-### Health Monitoring
-Use `/api/health` endpoint for:
-- Uptime monitoring
-- Elasticsearch cluster health checks
-- Response time tracking
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `SPARKPOST_AUTH_TYPE` | Authentication method: `basic`, `oauth`, or `none` | No | `none` |
+| `SPARKPOST_WEBHOOK_USERNAME` | Basic Auth username | If auth=basic | - |
+| `SPARKPOST_WEBHOOK_PASSWORD` | Basic Auth password | If auth=basic | - |
+| `SPARKPOST_OAUTH_CLIENT_ID` | OAuth client ID | If auth=oauth | - |
+| `SPARKPOST_OAUTH_JWKS_ENDPOINT` | JWKS endpoint URL | If auth=oauth | - |
+| `SPARKPOST_OAUTH_AUDIENCE` | JWT audience claim | If auth=oauth | - |
+| `SPARKPOST_OAUTH_SCOPES` | Required scopes (comma-separated) | No | - |
+| `ELASTICSEARCH_CLOUD_ID` | Elasticsearch Cloud deployment ID | Yes | - |
+| `ELASTICSEARCH_API_KEY` | Elasticsearch API key | Yes | - |
+| `NODE_ENV` | Environment (development/production) | No | `development` |
+| `LOG_LEVEL` | Logging level: `error`, `warn`, `info`, `debug` | No | `info` |
+| `LOG_HTTP_HEADERS` | Include HTTP headers in debug logs | No | `false` |
 
-## 🧪 Development
+## 🧪 Testing
 
-### Run Tests
+### **Test Basic Auth**
 ```bash
-npm test
-npm run test:watch
+curl -X POST http://localhost:3000/api/webhook \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic $(echo -n 'username:password' | base64)" \
+  -d '[{"msys":{"message_event":{"event_id":"test","timestamp":"2025-08-11T08:00:00.000Z","type":"delivery","recipient":"test@example.com"}}}]'
 ```
 
-### Code Quality
+### **Test OAuth**
 ```bash
-npm run lint
-npm run lint:fix
+curl -X POST http://localhost:3000/api/webhook \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '[{"msys":{"message_event":{"event_id":"test","timestamp":"2025-08-11T08:00:00.000Z","type":"delivery","recipient":"test@example.com"}}}]'
 ```
 
-### Local Testing with ngrok
+### **Test No Auth (Development)**
 ```bash
-# Start your dev server
-npm run dev
-
-# In another terminal, expose your local server
-ngrok http 3000
-
-# Use the ngrok URL in SparkPost webhook configuration
+curl -X POST http://localhost:3000/api/webhook \
+  -H "Content-Type: application/json" \
+  -d '[{"msys":{"message_event":{"event_id":"test","timestamp":"2025-08-11T08:00:00.000Z","type":"delivery","recipient":"test@example.com"}}}]'
 ```
 
 ## 🚀 Production Deployment
 
-### Vercel Deployment
-1. Connect your GitHub repository to Vercel
-2. Set environment variables in Vercel dashboard
-3. Deploy automatically on git push
-4. Configure custom domain if needed
+Your enhanced webhook system now includes:
 
-### Environment Variables in Vercel
-```
-SPARKPOST_WEBHOOK_SECRET=your_secret_here
-ELASTICSEARCH_CLOUD_ID=your_cloud_id
-ELASTICSEARCH_API_KEY=your_api_key
-NODE_ENV=production
-LOG_LEVEL=info
-```
+✅ **Flexible Authentication** - Choose the auth method that works for your setup  
+✅ **Comprehensive Debug Logging** - Track every request with detailed logs  
+✅ **Enhanced Security** - Multiple layers of protection and validation  
+✅ **Production Ready** - Scalable, monitored, and reliable  
 
-## 📊 Project Structure
-
-```
-├── api/
-│   ├── webhook.js          # Main webhook handler
-│   └── health.js           # Health check endpoint
-├── lib/
-│   ├── validation.js       # Security & data validation
-│   ├── eventProcessor.js   # Elasticsearch integration
-│   └── logger.js           # Centralized logging
-├── package.json            # Dependencies & scripts
-├── vercel.json            # Vercel configuration
-└── README.md              # Documentation
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Webhook not receiving events:**
-- Check SparkPost webhook configuration
-- Verify webhook URL is accessible
-- Ensure webhook secret matches
-
-**Elasticsearch connection issues:**
-- Verify Cloud ID and API key
-- Check API key permissions
-- Review cluster health
-
-**Signature validation failing:**
-- Ensure webhook secret is correct
-- Check Content-Type header
-- Verify request body encoding
-
-### Debug Mode
-```bash
-export LOG_LEVEL=debug
-vercel dev
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes and add tests
-4. Submit a pull request
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
----
-
-**🎉 Your SparkPost webhook is ready for production!**
-
-Next steps:
-1. Deploy to Vercel
-2. Configure SparkPost webhook URL
-3. Monitor via `/api/health` endpoint
-4. Analyze events in Elasticsearch
+**🎉 Your SparkPost webhook is now enterprise-ready with flexible authentication and comprehensive debugging capabilities!**
