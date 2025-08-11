@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
       method: req.method,
       url: req.url,
       ip: req.ip || req.connection.remoteAddress,
-      userAgent: req.get('User-Agent')
+      userAgent: req.headers['user-agent']
     });
     return res.status(405).json({ 
       error: 'Method not allowed',
@@ -74,7 +74,7 @@ module.exports = async (req, res) => {
         error: authResult.error,
         authType: process.env.SPARKPOST_AUTH_TYPE,
         ip: req.ip || req.connection.remoteAddress,
-        userAgent: req.get('User-Agent')
+        userAgent: req.headers['user-agent']
       });
       
       return res.status(401).json({
@@ -195,8 +195,8 @@ module.exports = async (req, res) => {
       method: req.method,
       url: req.url,
       ip: req.ip || req.connection.remoteAddress,
-      userAgent: req.get('User-Agent'),
-      contentType: req.get('Content-Type'),
+      userAgent: req.headers['user-agent'],
+      contentType: req.headers['content-type'],
       eventCount: Array.isArray(req.body) ? req.body.length : 0,
       processingTime: `${processingTime}ms`,
       authType: process.env.SPARKPOST_AUTH_TYPE
